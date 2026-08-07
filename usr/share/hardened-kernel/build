@@ -3,13 +3,25 @@
 ## Copyright (C) 2019 - 2025 ENCRYPTED SUPPORT LLC <adrelanos@whonix.org>
 ## See the file COPYING for copying conditions.
 
-set -x
+set -o errexit
+set -o nounset
+set -o pipefail
+set -o errtrace
+shopt -s inherit_errexit
+shopt -s shift_verbose
 
-set -e
+## Assigned only when the matching option is given. kernel_config in particular
+## is read by the guard below whose whole job is to say "you need to add either
+## --vm or --host" -- under nounset the unset read aborted before that message
+## could print, replacing it with a bash error.
+debug=""
+kernel_config=""
 
 while :
 do
-   case $1 in
+   ## The loop runs until the arguments are exhausted, so its last
+   ## iteration reads an unset $1 by design.
+   case "${1:-}" in
    --debug)
       debug="true"
       shift
@@ -31,7 +43,7 @@ do
       break
       ;;
    -*)
-      echo "ERROR: Not a valid option." >&2
+      printf '%s\n' "ERROR: Not a valid option." >&2
       exit 1
       ;;
    *)
@@ -40,8 +52,8 @@ do
    esac
 done
 
-if [ "$kernel_config" = "" ]; then
-   echo "ERROR: You need to add either --vm or --host parameter." >&2
+if [ "${kernel_config}" = "" ]; then
+   printf '%s\n' "ERROR: You need to add either --vm or --host parameter." >&2
    exit 1
 fi
 
@@ -56,11 +68,14 @@ MYDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 ## Debugging.
 whoami
 env
-true "CI: $CI"
+## CI is set only by the CI runner, and this is a no-op 'true' string --
+## but it is still a parameter expansion, so under nounset it aborted every
+## LOCAL build. Line 107 below already defaults it.
+true "CI: ${CI:-}"
 
 ## TODO: do not use networking as per https://forums.whonix.org/t/kernel-recompilation-for-better-hardening/7598/214
 ## https://forums.whonix.org/t/kernel-recompilation-for-better-hardening/7598/267
-"$MYDIR/download"
+"${MYDIR}/download"
 
 ## TODO: auto detect from files in folder /usr/src/hardened-kernel/files
 version="4.19.122"
@@ -68,64 +83,67 @@ version="4.19.122"
 ## Location similar to DKMS.
 ## DKMS uses /var/lib/dkms/pkg-name/build/.
 working_folder="/var/lib/hardened-kernel/${kernel_config}"
-rm -r -f "$working_folder"
-mkdir -p "$working_folder"
-chmod o-rwx "$working_folder"
+safe-rm -r -f -- "${working_folder}"
+mkdir -p "${working_folder}"
+chmod o-rwx "${working_folder}"
 
 source_folder="/usr/src/hardened-kernel/files"
 
 ## TODO
-mkdir -p "$source_folder"
+mkdir -p "${source_folder}"
 
 extracted_linux_kernel_sources_folder="${working_folder}/linux-${version}/"
 
 ## Debugging.
-ls "$source_folder"
-ls "$working_folder"
+ls "${source_folder}"
+ls "${working_folder}"
 
 ## Sanity tests.
 test -r "${source_folder}/linux-${version}.tar.xz"
 test -r "${source_folder}/linux-hardened-${version}.a.patch"
 
-tar -xf "${source_folder}/linux-${version}.tar.xz" -C "$working_folder"
+tar -xf "${source_folder}/linux-${version}.tar.xz" -C "${working_folder}"
 
 ## Debugging.
-ls "$extracted_linux_kernel_sources_folder"
+ls "${extracted_linux_kernel_sources_folder}"
 
-cat "${source_folder}/linux-hardened-${version}.a.patch" | patch --silent -p1 -d "$extracted_linux_kernel_sources_folder"
+## The cat keeps the data flow reading left to right, patch file first.
+## Rewriting a kernel-patch invocation is not this pass's business.
+# shellcheck disable=SC2002
+cat "${source_folder}/linux-hardened-${version}.a.patch" | patch --silent -p1 -d "${extracted_linux_kernel_sources_folder}"
 
-cp "${MYDIR}/${kernel_config}" "$extracted_linux_kernel_sources_folder/.config"
+cp "${MYDIR}/${kernel_config}" "${extracted_linux_kernel_sources_folder}/.config"
 
 ## Sanity test.
-diff "${MYDIR}/${kernel_config}" "$extracted_linux_kernel_sources_folder/.config"
+diff "${MYDIR}/${kernel_config}" "${extracted_linux_kernel_sources_folder}/.config"
 
 if [ "${CI:-}" = "true" ]; then
    true "Sanity test. 'make oldconfig' should not modify '.config'."
    true "https://forums.whonix.org/t/kernel-recompilation-for-better-hardening/7598/317"
-   make oldconfig -C "$extracted_linux_kernel_sources_folder"
-   diff "${MYDIR}/${kernel_config}" "$extracted_linux_kernel_sources_folder/.config"
+   make oldconfig -C "${extracted_linux_kernel_sources_folder}"
+   diff "${MYDIR}/${kernel_config}" "${extracted_linux_kernel_sources_folder}/.config"
 fi
 
-if [ "$debug" = "true" ]; then
+if [ "${debug}" = "true" ]; then
    if [ "${continue_debug,,}" = "y" ]; then
       true
    else
       ## read requires stdin. Otherwise would fail if stdin is not connected.
       read -r -p "WARNING: You have configured to build your kernel with debugging enabled. This can severely worsen security. Continue? (y/n) " continue_debug
       if [ ! "${continue_debug,,}" = "y" ]; then
-         echo "You have selected to not continue. Exiting."
+         printf '%s\n' "You have selected to not continue. Exiting."
          exit
       fi
    fi
 
-   cat "${MYDIR}/debugging-config" >> "$extracted_linux_kernel_sources_folder/.config"
+   cat "${MYDIR}/debugging-config" >> "${extracted_linux_kernel_sources_folder}/.config"
    if [ "${kernel_config}" = "hardened-host-kernel" ]; then
-     cat "${MYDIR}/debugging-config-host" >> "$extracted_linux_kernel_sources_folder/.config"
+     cat "${MYDIR}/debugging-config-host" >> "${extracted_linux_kernel_sources_folder}/.config"
    fi
-   make oldconfig -C "$extracted_linux_kernel_sources_folder"
+   make oldconfig -C "${extracted_linux_kernel_sources_folder}"
 fi
 
-make deb-pkg -j "$(($(nproc) + 1))" -C "$extracted_linux_kernel_sources_folder"
+make deb-pkg -j "$(($(nproc) + 1))" -C "${extracted_linux_kernel_sources_folder}"
 
 ## Debugging.
-ls "$working_folder"
+ls "${working_folder}"
