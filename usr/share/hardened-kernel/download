@@ -10,6 +10,8 @@
 ## because a single directive covers only the next command and there are five.
 # shellcheck disable=SC2086
 
+## Keep the command trace: it is this script's diagnostic output.
+set -x
 set -o errexit
 set -o nounset
 set -o pipefail
