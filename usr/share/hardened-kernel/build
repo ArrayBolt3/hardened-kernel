@@ -18,6 +18,7 @@ shopt -s shift_verbose
 ## could print, replacing it with a bash error.
 debug=""
 kernel_config=""
+continue_debug=""
 
 while :
 do
