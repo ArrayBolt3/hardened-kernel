@@ -3,9 +3,14 @@
 ## Copyright (C) 2019 - 2025 ENCRYPTED SUPPORT LLC <adrelanos@whonix.org>
 ## See the file COPYING for copying conditions.
 
+## Keep the command trace: it is this script's diagnostic output.
 set -x
-
-set -e
+set -o errexit
+set -o nounset
+set -o pipefail
+set -o errtrace
+shopt -s inherit_errexit
+shopt -s shift_verbose
 
 true "$0: start"
 
@@ -28,7 +33,7 @@ apt-get --yes install sudo virt-what lintian
 #systemd-detect-virt || true
 virt-what || true
 pwd_output="$(pwd)" || true
-ls "$pwd_output" || true
+ls "${pwd_output}" || true
 ls /home || true
 
 ## The environment variables are not set here.
@@ -49,8 +54,12 @@ true "$0 INFO: OK."
 ## Move to /home/travis/build/ so travis.debian.net script can copy it out of
 ## the docker container.
 ## XXX: using find in for might not be safe but good enough for CI.
+## Fragile for names with whitespace, but these are kernel package files
+## this build produced itself, in a directory it controls. Flagged rather
+## than restructured.
+# shellcheck disable=SC2044
 for file_name in $(find /var/lib/hardened-kernel/hardened-vm-kernel -type f -maxdepth 1) ; do
-   mv "$file_name" /home/travis/build/
+   mv "${file_name}" /home/travis/build/
 done
 
 ## Debugging.
@@ -89,7 +98,7 @@ lintian_suppress_tags+="package-contains-documentation-outside-usr-share-doc,"
 
 ## Try lintian newly built kernel.
 lintian \
-   --suppress-tags "$lintian_suppress_tags" \
+   --suppress-tags "${lintian_suppress_tags}" \
    --quiet \
    --pedantic \
    --info \
