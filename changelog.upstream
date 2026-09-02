@@ -1,3 +1,204 @@
+commit 094032cf105ccadb5de9a61bbc6e805af3019d90
+Merge: 03f6367 a3ddaee
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Fri Aug 21 02:38:44 2026 -0400
+
+    Merge remote-tracking branch 'refs/remotes/org-ai-assisted/ai'
+
+commit a3ddaee436a7502f34257d8acfcb415c79f7f48f
+Author: claude (dev182 e09ec5cf-4ebf-4e1b-88e5-55fbac6ef1d3) <noreply@anthropic.com>
+Date:   Mon Aug 10 13:56:10 2026 -0400
+
+    build: initialize continue_debug in the option block
+
+    Under nounset, invoking --debug without --non-interactive left
+    continue_debug unset when the debug-confirmation guard read
+    ${continue_debug,,}, aborting the build with a bash error instead
+    of prompting. Default it empty alongside debug and kernel_config.
+
+    Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+
+commit 3895671ae33d1debffe57eecb0dc609519fc8860
+Author: claude (dev163 38f9745c-aed1-4fb4-b6ae-9899f20f8de2) <noreply@anthropic.com>
+Date:   Sat Aug 8 04:55:38 2026 -0400
+
+    CI: enrol in the pre-push static gate
+
+    This repo had no GitHub Actions workflow at all, so nothing verified its PRs on
+    the server side -- the only gate was ci-repro run locally.
+
+    The workflow file is the canonical consumer template, copied verbatim from
+    developer-meta-files/consumer-templates/.github/workflows/. It is managed: once
+    present, dm-packaging-helper-script's pkg_update_consumer_workflows keeps it in
+    sync, so it must not be hand-edited here.
+
+    Enrolment is deliberately a SEPARATE act from propagation: that function uses
+    pkg_update_if_exists, which only updates a workflow that already exists, and
+    pkg_install_dependabot_yml skips any repo with no .github/workflows/ directory.
+    Neither creates the first one. Hence this commit.
+
+    Scope: the repos this session actually changed and that ship shell code -- not
+    every repo lacking CI. Enrolling a repo consumes shared org-wide Actions
+    concurrency (20 jobs, the real limit; public repos are not minute-billed), so it
+    is worth spending where there is signal.
+
+    Verified BEFORE enrolling: 'ci-repro.sh --worktree' passes for this repo, so the
+    gate arrives green rather than turning someone's PR red on arrival.
+
+    NOTE, so it is not a surprise: creating .github/workflows/ makes this repo
+    eligible for the canonical .github/dependabot.yml on the next propagation pass,
+    which pkg_install_dependabot_yml installs into any repo that uses Actions.
+
+commit c02da766d3b590dc71c4b5abdd67b72362c848a8
+Author: claude (dev163 38f9745c-aed1-4fb4-b6ae-9899f20f8de2) <noreply@anthropic.com>
+Date:   Fri Aug 7 14:52:43 2026 -0400
+
+    restore 'set -x' dropped by the strict-mode pass
+
+    The R-010 conversion replaced each script's existing preamble wholesale and did
+    not carry 'set -x' across. That is a silent loss of diagnostic output, and for
+    several of these it is the only output there is:
+
+    - build-time scripts (hardened-kernel build / download / ci_test, tirdad
+      build.sh, initializer-dist chroot-scripts-post.d): the trace IS the build log,
+      so a failing invocation and its expanded arguments become unavailable exactly
+      when they are needed.
+    - boot-time scripts (libvirt-dist, repository-dist-initializer).
+    - scripts whose only messages are 'true "INFO: ..."' lines, which produce
+      nothing on their own -- removing xtrace silences them completely.
+    - test harnesses (tb-updater unit_test, sdwdate-gui fuzzer), where the trace is
+      the point.
+
+    It was also inconsistent: initializer-dist's 80_cleanup kept it while its four
+    siblings in the same directory lost it.
+
+    Nothing asked for this and no commit described it as intentional, so it is
+    restored everywhere it was active.
+
+    Found by codex on initializer-dist. The other 19 files came from auditing the
+    whole pass for the same pattern.
+
+    Testing
+    -------
+
+    Gate exit 0 in an ISOLATED checkout, all eleven packages.
+
+    Audit: ~/strict-pass-tests/audit-stripped-setx.sh, which compares every file
+    changed on an 'ai' branch against org-ai-assisted/master and reports any that
+    had 'set -x' and no longer do.
+
+      before:  examined 43 package(s) on branch ai, 342 changed file(s); 23 stripped
+      after:   examined 43 package(s) on branch ai, 342 changed file(s);  0 stripped
+
+    The audit prints its own coverage, and fails outright if it examines zero
+    packages. Its first version tested '[ -d "$pkg/.git" ]', which is false for a
+    submodule -- .git is a FILE there -- so it skipped all 43 and reported nothing
+    stripped. A count that can be read is the difference between "clean" and "never
+    looked".
+
+commit 54efd60b2424f460a088d38692222d831a7cdfc2
+Author: claude (dev163 38f9745c-aed1-4fb4-b6ae-9899f20f8de2) <noreply@anthropic.com>
+Date:   Fri Aug 7 11:53:48 2026 -0400
+
+    hardened-kernel: restore the deliberate curl option splitting
+
+    A blanket 'shellcheck -f diff' sweep in the previous commit quoted
+
+      curl ${curl_opts} ...   ->   curl "${curl_opts}" ...
+
+    and curl_opts holds FIVE separate options:
+
+      --tlsv1.2 --proto =https --location --remote-name
+
+    Quoted, curl receives them as ONE argument, rejects it, and the kernel-source
+    download fails outright. Three of the five are TLS/protocol restrictions, so
+    this was not a cosmetic split. Master had it correctly unquoted; the sweep
+    broke it.
+
+    Unquoted again, with a file-wide SC2086 waiver stating the reason -- file-wide
+    because a single directive covers only the next command and there are five
+    invocations.
+
+    Why the harness missed it, and what changed
+    --------------------------------------------
+
+    The curl stub accepted ANY arguments and exited 0, so a collapsed option string
+    looked exactly like success. The stubs now REJECT any option-looking argument
+    containing a space, printing REJECTED_MASHED_OPTION.
+
+      real tree:  9 same, 0 differing
+      canary (curl_opts re-quoted, exactly as the sweep did):
+                  REJECTED_MASHED_OPTION: [--tlsv1.2 --proto =https --location --remote-name]
+                  on the '--vm' and '--host' cases
+
+    Gate exit 0 in an ISOLATED checkout.
+
+    This is the third instance of the same mistake in this pass, after
+    sandbox-app-launcher's bwrap_args and its pgrep PID list. All three came from
+    applying 'shellcheck -f diff' WHOLESALE to a package instead of reading each
+    proposed quoting change. An expansion that is unquoted in working code is
+    usually unquoted ON PURPOSE.
+
+commit 71b7e5d0ec193a89c34b648b910a1f1cedd84d6f
+Author: claude (dev163 38f9745c-aed1-4fb4-b6ae-9899f20f8de2) <noreply@anthropic.com>
+Date:   Fri Aug 7 10:57:28 2026 -0400
+
+    hardened-kernel: R-010 strict mode for the 3 build scripts
+
+    Files: usr/share/hardened-kernel/{build,ci_test,download}.
+
+    Two real nounset traps, both on the LOCAL build path
+    ----------------------------------------------------
+
+    - kernel_config is assigned only by '--vm' or '--host', and read by the guard
+      whose whole job is to print "You need to add either --vm or --host
+      parameter." Under nounset the unset read aborted BEFORE that message,
+      replacing a clear instruction with a bash error.
+    - 'true "CI: ${CI}"' is a no-op debug string, but still a parameter expansion.
+      CI is set only by the CI runner, so every LOCAL build aborted on it. Line 107
+      of the same file already used '${CI:-}'.
+
+    That is the third 'true "... ${var} ..."' trap in this pass, after
+    msgprogressbar's ${parentpid} and browser-choice's ${HOME}. The shape is
+    invisible in normal operation and fatal under nounset.
+
+    Also
+    ----
+
+    - 'case $1' in the option loop.
+    - R-120: 'rm -r -f "$working_folder"' -> 'safe-rm -r -f --', no fallback.
+    - 3 'echo' -> printf.
+    - Waivers, each with a reason: SC2002 on the 'cat patch | patch' pipeline
+      (rewriting a kernel-patch invocation is not this pass's business), SC2044 on
+      the find loop over files this build produced itself in a directory it
+      controls, SC2034 on download's MYDIR.
+
+    Testing
+    -------
+
+    Gate exit 0 in an ISOLATED checkout.
+
+    New harness at ~/strict-pass-tests/hk-test/. These scripts compile a kernel, so
+    none of them runs for real: the tools are stubbed and the paths redirected into
+    a fake root. Nine cases across the argument handling and the CI variable, with
+    CI UNSET -- the local build -- as the primary axis.
+
+      9 same, 0 differing
+
+    Canary: reverting the option-target initialisation and the CI default gives
+    6 same, 3 differing, all three nounset aborts.
+
+    Harness note: safe-rm is deliberately NOT stubbed. Stubbing only the new name
+    made the 'rm' -> 'safe-rm' swap show up as an output difference that says
+    nothing about behaviour; both are real here and delete the same path inside the
+    fake root.
+
+commit 03f63678e74dcca6c1c8451ac55beb3aee575d3a
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Wed May 20 22:04:11 2026 +0000
+
+    bumped changelog version
+
 commit 0596aa81cfc9cebf171cea5171ca6511f25d010c
 Author: Patrick Schleizer <adrelanos@whonix.org>
 Date:   Wed May 20 16:56:50 2026 -0400

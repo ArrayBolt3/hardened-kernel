@@ -3,10 +3,25 @@
 ## Copyright (C) 2019 - 2025 ENCRYPTED SUPPORT LLC <adrelanos@whonix.org>
 ## See the file COPYING for copying conditions.
 
+## 'curl ${curl_opts}' is DELIBERATELY UNQUOTED throughout: curl_opts holds
+## FIVE separate options and quoting collapses them into one argument that curl
+## rejects, breaking the kernel-source download outright. Three of the five are
+## TLS/protocol restrictions, so this is not a cosmetic split. File-wide,
+## because a single directive covers only the next command and there are five.
+# shellcheck disable=SC2086
+
+## Keep the command trace: it is this script's diagnostic output.
 set -x
+set -o errexit
+set -o nounset
+set -o pipefail
+set -o errtrace
+shopt -s inherit_errexit
+shopt -s shift_verbose
 
-set -e
-
+## Kept for parity with the sibling scripts and referenced by the comments
+## below; not read by this one.
+# shellcheck disable=SC2034
 MYDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
 ## example MYDIR:
@@ -38,11 +53,16 @@ linux_hardened_patch_archive="https://github.com/anthraxx/linux-hardened/release
 ## https://www.hardenize.com/report/kernel.org/1603725038#www_tls
 curl_opts="--tlsv1.2 --proto =https --location --remote-name"
 
-curl $curl_opts "${kernel_sha256sums_file}" -o "./sha256sums.asc"
-curl $curl_opts "${kernel_source_signature}" -o "./linux-${version}.tar.sign"
-curl $curl_opts "${kernel_source_archive}" -o "./linux-${version}.tar.xz"
-curl $curl_opts "${linux_hardened_patch_signature}" -o "./linux-hardened-${version}.a.patch.sig"
-curl $curl_opts "${linux_hardened_patch_archive}" -o "./linux-hardened-${version}.a.patch"
+## Every 'curl ${curl_opts}' below is DELIBERATELY UNQUOTED: curl_opts holds
+## FIVE separate options and quoting collapses them into one argument that curl
+## rejects, breaking the kernel-source download outright. Three of the five are
+## TLS/protocol restrictions, so this is not a cosmetic split.
+
+curl ${curl_opts} "${kernel_sha256sums_file}" -o "./sha256sums.asc"
+curl ${curl_opts} "${kernel_source_signature}" -o "./linux-${version}.tar.sign"
+curl ${curl_opts} "${kernel_source_archive}" -o "./linux-${version}.tar.xz"
+curl ${curl_opts} "${linux_hardened_patch_signature}" -o "./linux-hardened-${version}.a.patch.sig"
+curl ${curl_opts} "${linux_hardened_patch_archive}" -o "./linux-hardened-${version}.a.patch"
 
 true "OK"
 
